@@ -2,6 +2,11 @@
 
 ## [Unreleased] 2026-11-16 — 接入 DIY STT 语音转文字链路，面板支持「大模型直听 / STT 转文字」切换与悬浮说明
 
+### 开源发布与检索优化（2026-11-17）
+
+- 新增根目录 `README.md`、`LICENSE`（MIT）与 AI/Agent 索引文件 `llms.txt`，补齐真实 Chrome 渲染运行截图（`assets/panel-answer-stt.png`、`assets/panel-tooltip.png`、`assets/panel-home-logs.png`）、完整使用指南与免责声明；
+- 更新 `tangwg学习通.user.js` 头部 `@name`、`@description`、`@homepageURL`、`@supportURL` 元信息，便于脚本平台、搜索引擎与 AI 检索。
+
 ### 背景
 
 纯文本或通过 Claude 协议转发的模型（如 `MiniMax-M3.1-Flash`）在 CPA 中会静默丢弃 `input_audio`，导致听力题无音频可用而盲猜。需要让用户自由决定听力音频走「大模型直听」还是「STT 转文字」，并且 STT 端点、密钥与模型全部支持面板 DIY 配置（不硬编码），同时配套小问号悬浮说明。

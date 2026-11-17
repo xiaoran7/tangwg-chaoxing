@@ -1,7 +1,28 @@
-# tangwg-chaoxing
+# tangwg-chaoxing（超星学习通｜知到智慧树 AI 答题与听力 STT 助手）
 
-> **完全自托管 / 免代理双链路 LLM + DIY STT 网课辅助脚本与题库代理工程**
-> 基于上游开源 UserScript 二次深度重构，移除第三方商业题库绑定，接入开放式 OpenAI 兼容大模型与自定义语音转文字（STT）链路。
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![UserScript](https://img.shields.io/badge/UserScript-Tampermonkey%20%7C%20ScriptCat-176ae5)](./tangwg学习通.user.js)
+[![LLM & STT](https://img.shields.io/badge/AI-OpenAI%20%7C%20Deepgram%20STT%20%7C%20Whisper-15803d)](./llms.txt)
+
+> **完全自托管 / 免代理双链路 LLM + DIY STT 网课辅助油猴脚本与 FastAPI 题库代理**
+> 基于上游开源 UserScript 二次深度重构，移除第三方商业题库与卡密绑定，支持浏览器免部署直连任意 OpenAI 兼容大模型、自定义 Deepgram / Whisper 语音转文字（STT）攻克英语听力复合大题、Flash 模型自动 `high` 思考强度，以及双路 AI 复核与第 3 路专家仲裁。
+>
+> 🤖 **AI / Agent 检索入口**：仓库根目录提供标准 [`llms.txt`](./llms.txt)，方便 AI 搜索引擎与编码 Agent 快速索引架构与文件导航。
+
+---
+
+## 📑 目录索引（Table of Contents）
+
+- [⚠️ 免责声明（Disclaimer）](#️-免责声明disclaimer)
+- [📸 真实界面与运行截图](#-真实界面与运行截图)
+- [一、最上游来源说明](#一最上游来源说明)
+- [二、我们做了哪些核心改动](#二我们做了哪些核心改动)
+- [三、完整使用指南（含开发者模式、脚本权限与跨域放行）](#三完整使用指南)
+- [四、可选：部署自建题库代理 (`proxy/`)](#四可选部署自建题库代理-proxy)
+- [五、仓库文件索引（Repository Structure）](#五仓库文件索引repository-structure)
+- [六、常见问题与检索索引（FAQ & Keywords）](#六常见问题与检索索引faq--keywords)
+- [七、本地自动化验证](#七本地自动化验证)
+- [八、开源协议](#八开源协议)
 
 ---
 
@@ -13,6 +34,18 @@
 2. **风险自负**：使用者需自行评估使用第三方浏览器脚本与自动化工具可能带来的账号风控、成绩作废或服务封禁风险；所有通过第三方 AI / STT 接口产生的 API 费用、网络流量与数据合规责任均由使用者自行承担。
 3. **无担保声明**：本项目按 MIT 协议按“现状（AS-IS）”提供，作者与贡献者不对题目解答准确率、接口稳定性或因使用本项目导致的任何直接/间接损失承担责任。
 4. **侵权联系**：本项目对上游公开脚本的二次开发已严格保留并指明原作者归属；如相关权利方认为存在不当引用，请通过 GitHub Issues 联系，我们将第一时间处理。
+
+---
+
+## 📸 真实界面与运行截图
+
+### 1. 「答题」面板：免部署直连 + Flash 自动 High 思考强度 + DIY STT 听力转写 + 复合大题求解
+![答题面板与听力STT求解实拍](./assets/panel-answer-stt.png)
+
+### 2. 渐进式披露气泡（行内小问号 `?` + Shadow DOM 内嵌富文本 Tooltip）与实时日志
+| 行内小问号内嵌浮窗说明（`teleported: false`） | 首页实时执行与 STT 转写/双路复核日志 |
+|---|---|
+| ![行内问号浮窗说明](./assets/panel-tooltip.png) | ![首页实时日志](./assets/panel-home-logs.png) |
 
 ---
 
@@ -109,7 +142,38 @@ cp .env.example .env   # 填写 CPA_BASE_URL / CPA_API_KEY / PROXY_TOKEN 等
 
 ---
 
-## 五、本地自动化验证
+## 五、仓库文件索引（Repository Structure）
+
+| 路径 | 说明 |
+|---|---|
+| [`tangwg学习通.user.js`](./tangwg学习通.user.js) | Tampermonkey / ScriptCat 用户脚本本体（`v0.9.0`），内含直连双路复核、DIY STT、思考强度控制与超星/智慧树解析器 |
+| [`llms.txt`](./llms.txt) | 面向 AI 搜索引擎与 Agent 的标准化仓库摘要与文件索引 |
+| [`direct_mode_test.mjs`](./direct_mode_test.mjs) | 纯 Node 离线单元测试套件（107 项断言，覆盖直连 SSE、选项吸附、STT、Deepgram 与思考强度） |
+| [`proxy/server.py`](./proxy/server.py) | FastAPI 题库代理主服务（SQLite 30 天缓存、双路复核、第 3 路仲裁、相似度吸附） |
+| [`proxy/upstream.py`](./proxy/upstream.py) | 上游流式调用层、硬墙钟超时截断与 OpenAI / Deepgram STT 适配层 |
+| [`proxy/contract_test.py`](./proxy/contract_test.py) | 代理端离线契约与时序测试套件（35 项断言） |
+| [`proxy/e2e_smoke.py`](./proxy/e2e_smoke.py) | 本地端到端 uvicorn + 模拟上游冒烟测试 |
+| [`proxy/ui_smoke.py`](./proxy/ui_smoke.py) | 基于 Playwright + 真 Chrome 的 Shadow DOM 面板渲染与交互冒烟测试 |
+| [`proxy/README.md`](./proxy/README.md) | 题库代理部署、Nginx TLS 反代与调试文档 |
+| [`proxy/CHANGELOG.md`](./proxy/CHANGELOG.md) | 详细版本演进与问题排查记录 |
+
+---
+
+## 六、常见问题与检索索引（FAQ & Keywords）
+
+- **Q1：为什么安装了篡改猴脚本，打开超星学习通/智慧树页面却没有任何悬浮窗？**
+  - 请检查：① 浏览器 `chrome://extensions` 或 `edge://extensions` 是否已开启**开发者模式**；② 篡改猴扩展「详情」里是否已打开**允许运行用户脚本（Allow User Scripts）**；③ 是否处于题目/章节任务点页面（如 `/mycourse/studentstudy`、`/mooc2/work/dowork`、`/exam-ans/exam`、`/stuExamWeb.html`）。
+- **Q2：日志提示「上游网络错误」或「STT 网络错误」怎么解决？**
+  - 检查 Tampermonkey 弹出的跨域域名授权窗口是否被拒绝；可在 Tampermonkey → 本脚本「设置」→「XHR 安全 / 用户域名白名单」中放行你的 API 域名，并确认远端接口使用 `HTTPS`（仅 `127.0.0.1` / `localhost` 允许 `HTTP`）。
+- **Q3：为什么英语听力题用了 STT 还是做错其中一道小题？**
+  - 语音转文字（如 Deepgram `nova-3`）只负责把录音变成英文原文，最终选哪个选项取决于**主答题模型的逻辑推理能力**。建议使用带 `flash` 的模型（默认自动开启 `high` 思考强度）或切换推理能力更强的模型；若录音开头带中文题干播报，可在 Deepgram 端点后加 `?language=en`。
+
+**检索标签（Search Keywords）**：
+`超星学习通脚本` · `学习通自动答题` · `知到智慧树网课助手` · `油猴脚本接入大模型` · `学习通英语听力自动答题` · `Deepgram STT 语音转文字` · `Whisper 听力转写` · `OpenAI API 题库代理` · `Chaoxing Xuexitong Userscript` · `Zhihuishu MOOC Helper` · `Tampermonkey Allow User Scripts`
+
+---
+
+## 七、本地自动化验证
 
 在提交修改后可离线跑通全部检查（均使用 Mock 上游，不消耗真实额度）：
 
@@ -123,6 +187,6 @@ python proxy/ui_smoke.py
 
 ---
 
-## 六、开源协议
+## 八、开源协议
 
 本项目基于 [MIT License](./LICENSE) 开源。

@@ -1,0 +1,34 @@
+# tangwg-chaoxing (超星学习通 / 知到智慧树 AI 网课助手 & 自建题库代理)
+
+> Open-source Tampermonkey / ScriptCat userscript and FastAPI LLM proxy for Chaoxing (超星学习通 / Xuexitong) and Zhihuishu (知到智慧树). Supports zero-backend direct OpenAI-compatible LLM calls, DIY Speech-to-Text (STT) via OpenAI Whisper / Deepgram REST (`/v1/listen`) for English & Chinese listening comprehension, automatic `high` reasoning effort for `flash` models, and dual-AI consensus verification with 3rd-path expert arbitration.
+
+- Repository: https://github.com/xiaoran7/tangwg-chaoxing
+- License: MIT
+- Upstream Attribution: Refactored from "🥇超星学习通｜知到智慧树--网课小助手" by `isMobile` (`@namespace noshuang`, ScriptCat #711 / Greasy Fork)
+
+## Search Keywords & Indexing Terms (检索关键词)
+
+- 中文关键词：超星学习通脚本、学习通自动答题、知到智慧树脚本、网课小助手、油猴脚本接入大模型、学习通英语听力自动答题、Deepgram 语音转文字、Whisper 听力识别、免题库直连大模型、自建 AI 题库代理、Tampermonkey 开发者模式、复合听力阅读理解自动答题
+- English Keywords: Chaoxing userscript, Xuexitong auto answer, Zhihuishu helper, Tampermonkey MOOC assistant, OpenAI compatible quiz solver, Deepgram REST STT `/v1/listen`, Whisper audio transcription, dual-LLM verification, reasoning_effort auto flash high, FastAPI SQLite quiz proxy
+
+## Core Capabilities
+
+1. **Zero Hardcoded Commercial Endpoints**: Removes built-in paid question-bank domains (`search.tikuhai.com`) and UID/Referer telemetry.
+2. **Dual-Mode Routing via Single Endpoint Input**:
+   - Ends with `/v1` (or `/vN`): Browser Direct Mode (`GM_xmlhttpRequest` directly to any OpenAI-compatible `/v1/chat/completions` & `/v1/models`).
+   - Site root URL (e.g. `https://tiku.example.com`): Self-Hosted Proxy Mode (`POST /api/open/v1/search/exact` via `proxy/`).
+3. **Dual-AI Verification + 3rd-Path Arbitration**: Runs `temperature=0.0` and `0.3` in parallel with pair-grace timeouts (`20s` text / `35s` audio) and triggers a 3rd referee call on discrepancy.
+4. **Adaptive Reasoning Effort (`reasoning_effort`)**: Supports `auto` (default), `default`, `low`, `medium`, `high`. In `auto` mode, any model name containing `flash` (e.g. `MiniMax-M3.1-Flash`, `gemini-3.8-flash`) automatically uses `reasoning_effort="high"`.
+5. **Multimodal Audio & DIY STT Pipeline**:
+   - **LLM Direct Audio (`llm`)**: Sends `input_audio` base64 to native multimodal models.
+   - **DIY STT Mode (`stt`)**: Transcribes course audio once (cached by audio hash) before feeding pure text to any LLM. Auto-detects OpenAI-compatible `/v1/audio/transcriptions` (`Bearer`) and Deepgram REST `/v1/listen` (`Token`, `nova-3` / `whisper-large`), blocks `ws://`/`wss://` streaming URLs with clear guidance, and isolates cross-question DOM subtrees.
+
+## File Index
+
+- [README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/README.md): Overview, disclaimer, upstream attribution, Tampermonkey developer mode & `@connect` cross-origin permissions guide, and configuration manual.
+- [tangwg学习通.user.js](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/tangwg%E5%AD%A6%E4%B9%A0%E9%80%9A.user.js): Main Tampermonkey / ScriptCat userscript (`v0.9.0`, Vue 3 + Element Plus inside Shadow DOM).
+- [direct_mode_test.mjs](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/direct_mode_test.mjs): Offline Node.js unit test suite (107 assertions covering direct mode, SSE, option snapping, STT, Deepgram, and `flash` reasoning effort).
+- [proxy/README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/README.md): Deployment and architecture guide for the optional FastAPI + SQLite backend proxy.
+- [proxy/server.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/server.py): FastAPI server, SQLite answer & STT cache, option similarity snapping, and 3-way arbitration workflow.
+- [proxy/upstream.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/upstream.py): Upstream OpenAI/CPA streaming client, wall-clock timeout enforcement, and OpenAI/Deepgram STT adapter.
+- [proxy/contract_test.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/contract_test.py): Offline contract and timing test suite (35 assertions).

@@ -1,9 +1,11 @@
 // ==UserScript==
-// @name         tangwg学习通
+// @name         tangwg学习通（超星学习通｜知到智慧树 AI 答题与听力 STT 助手）
 // @namespace    noshuang
 // @version      0.9.0
 // @author       tangwg
-// @description  ciallo！
+// @description  超星学习通、知到智慧树网课辅助脚本：支持免部署直连 OpenAI 兼容大模型与自建题库代理、Deepgram/Whisper STT 英语听力转文字、Flash 模型自动 High 思考强度、双路 AI 复核与第 3 路仲裁
+// @homepageURL  https://github.com/xiaoran7/tangwg-chaoxing
+// @supportURL   https://github.com/xiaoran7/tangwg-chaoxing/issues
 // @license      MIT
 // @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='54' text-anchor='middle' dominant-baseline='central' font-size='82' font-family='Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif'%3E%F0%9F%92%AF%3C/text%3E%3C/svg%3E
 // @match        *://*.chaoxing.com/*
