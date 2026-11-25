@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tangwg学习通（超星学习通｜知到智慧树 AI 答题与听力 STT 助手）
 // @namespace    noshuang
-// @version      0.9.0
+// @version      0.9.1
 // @author       tangwg
 // @description  超星学习通、知到智慧树网课辅助脚本：支持免部署直连 OpenAI 兼容大模型与自建题库代理、Deepgram/Whisper STT 英语听力转文字、Flash 模型自动 High 思考强度、双路 AI 复核与第 3 路仲裁
 // @homepageURL  https://github.com/xiaoran7/tangwg-chaoxing
@@ -1414,12 +1414,12 @@
     "6": "简答题",
     "8": "听力/阅读综合大题"
   };
-  // 直连模式的墙钟预算（脚本自己计时，没有代理层兜底，所以比代理侧宽一些）
-  const DIRECT_TOTAL_BUDGET = 110;
-  const DIRECT_AUDIO_TOTAL_BUDGET = 200;
-  const DIRECT_PAIR_GRACE = 20;
-  const DIRECT_AUDIO_PAIR_GRACE = 35;
-  const DIRECT_MIN_ARBITRATE_BUDGET = 12;
+  // 直连模式的墙钟预算（适配长思考模型双路复核 + 第 3 路仲裁，远低于 OpenResty 900s 上限）
+  const DIRECT_TOTAL_BUDGET = 300;
+  const DIRECT_AUDIO_TOTAL_BUDGET = 420;
+  const DIRECT_PAIR_GRACE = 60;
+  const DIRECT_AUDIO_PAIR_GRACE = 90;
+  const DIRECT_MIN_ARBITRATE_BUDGET = 20;
 
   // OpenAI 兼容端点的 base 统一成 `…/v1`：用户填 https://host 或 https://host/v1 都能用。
   const normalizeOpenAiBase = (raw) => {
@@ -2008,7 +2008,7 @@
     return bytes;
   };
   const sttCache = /* @__PURE__ */ new Map();
-  const STT_REQUEST_TIMEOUT = 60e3;
+  const STT_REQUEST_TIMEOUT = 120e3;
   const fetchSttModels = () => {
     const api = useConfigStore().queryApis[0] || {};
     const rawEndpoint = (api.sttEndpoint || "").trim();
@@ -2217,7 +2217,7 @@
       logStore.addLog(`[听力题] 发现音频材料（来源：${scopeLabel}），正在拉取并转码: ${audioUrl.split("?")[0]}`, audioScope === "document" ? "warning" : "primary");
       const audioPayload = await fetchAudioAsBase64(audioUrl, signal);
       question.audio = audioPayload;
-      logStore.addLog(`[听力题] 音频就绪 (${audioPayload.format}, 大小: ${Math.round(audioPayload.data.length / 1024)} KB)，已配置 180s 听力超时`, "success");
+      logStore.addLog(`[听力题] 音频就绪 (${audioPayload.format}, 大小: ${Math.round(audioPayload.data.length / 1024)} KB)，已配置长时听力超时（直连 ${DIRECT_AUDIO_TOTAL_BUDGET}s / 代理 360s）`, "success");
       return audioPayload;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -2486,8 +2486,8 @@
       }
     }
     const data = JSON.stringify(postPayload);
-    const needsAudioTimeout = Boolean(postPayload.audio && postPayload.audio.data);
-    const requestTimeout = needsAudioTimeout ? 18e4 : 9e4;
+    const needsAudioTimeout = Boolean((postPayload.audio && postPayload.audio.data) || postPayload.audio_transcript);
+    const requestTimeout = needsAudioTimeout ? 36e4 : 24e4;
 
     const logStore = useLogStore();
     if (postPayload.audio_transcript) {

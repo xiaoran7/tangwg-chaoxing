@@ -17,7 +17,7 @@
 2. **Dual-Mode Routing via Single Endpoint Input**:
    - Ends with `/v1` (or `/vN`): Browser Direct Mode (`GM_xmlhttpRequest` directly to any OpenAI-compatible `/v1/chat/completions` & `/v1/models`).
    - Site root URL (e.g. `https://tiku.example.com`): Self-Hosted Proxy Mode (`POST /api/open/v1/search/exact` via `proxy/`).
-3. **Dual-AI Verification + 3rd-Path Arbitration**: Runs `temperature=0.0` and `0.3` in parallel with pair-grace timeouts (`20s` text / `35s` audio) and triggers a 3rd referee call on discrepancy.
+3. **Dual-AI Verification + 3rd-Path Arbitration**: Runs `temperature=0.0` and `0.3` in parallel with pair-grace timeouts (`60s` text / `90s` audio) and triggers a 3rd referee call on discrepancy.
 4. **Adaptive Reasoning Effort (`reasoning_effort`)**: Supports `auto` (default), `default`, `low`, `medium`, `high`. In `auto` mode, any model name containing `flash` (e.g. `MiniMax-M3.1-Flash`, `gemini-3.8-flash`) automatically uses `reasoning_effort="high"`.
 5. **Multimodal Audio & DIY STT Pipeline**:
    - **LLM Direct Audio (`llm`)**: Sends `input_audio` base64 to native multimodal models.
@@ -26,7 +26,7 @@
 ## File Index
 
 - [README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/README.md): Overview, disclaimer, upstream attribution, Tampermonkey developer mode & `@connect` cross-origin permissions guide, and configuration manual.
-- [tangwg学习通.user.js](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/tangwg%E5%AD%A6%E4%B9%A0%E9%80%9A.user.js): Main Tampermonkey / ScriptCat userscript (`v0.9.0`, Vue 3 + Element Plus inside Shadow DOM).
+- [tangwg学习通.user.js](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/tangwg%E5%AD%A6%E4%B9%A0%E9%80%9A.user.js): Main Tampermonkey / ScriptCat userscript (`v0.9.1`, Vue 3 + Element Plus inside Shadow DOM).
 - [direct_mode_test.mjs](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/direct_mode_test.mjs): Offline Node.js unit test suite (107 assertions covering direct mode, SSE, option snapping, STT, Deepgram, and `flash` reasoning effort).
 - [proxy/README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/README.md): Deployment and architecture guide for the optional FastAPI + SQLite backend proxy.
 - [proxy/server.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/server.py): FastAPI server, SQLite answer & STT cache, option similarity snapping, and 3-way arbitration workflow.

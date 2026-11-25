@@ -31,11 +31,12 @@ const typeHelper = sliceBetween("const QUESTION_TYPE_CODES", "const apiError = "
 // 链路判定：地址以 /vN 结尾即直连上游，否则走自建代理（面板不再有模式开关）
 const modeHelper = sliceBetween("const detectApiMode =", "const isObject = ");
 // 直连模式本体。测试里把两档宽限缩短到 1s / 1.5s，
-// 否则「首路有效后等副路」这一条要真跑 20s；其余常量保持脚本原值。
-const directBlock = sliceBetween("const DIRECT_SYSTEM_PROMPT", "const getAnswer = async")
-  .replace("const DIRECT_PAIR_GRACE = 20;", "const DIRECT_PAIR_GRACE = 1;")
-  .replace("const DIRECT_AUDIO_PAIR_GRACE = 35;", "const DIRECT_AUDIO_PAIR_GRACE = 1.5;");
-if (!directBlock.includes("const DIRECT_PAIR_GRACE = 1;")) {
+// 否则「首路有效后等副路」这一条要真跑 60s；其余常量保持脚本原值。
+const rawDirectBlock = sliceBetween("const DIRECT_SYSTEM_PROMPT", "const getAnswer = async");
+const directBlock = rawDirectBlock
+  .replace(/const DIRECT_PAIR_GRACE = \d+;/, "const DIRECT_PAIR_GRACE = 1;")
+  .replace(/const DIRECT_AUDIO_PAIR_GRACE = \d+;/, "const DIRECT_AUDIO_PAIR_GRACE = 1.5;");
+if (!directBlock.includes("const DIRECT_PAIR_GRACE = 1;") || !directBlock.includes("const DIRECT_AUDIO_PAIR_GRACE = 1.5;")) {
   throw new Error("宽限常量改写失败，脚本里的常量名变了");
 }
 
@@ -126,12 +127,17 @@ const eq = (name, actual, expected) =>
   check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 
 const run = async () => {
-  // 1. OpenAI 兼容 base 归一化
+  // 1. OpenAI 兼容 base 归一化 & 超时预算基线
   {
     const h = buildHarness(() => ({ abort() {} }));
     eq("base 归一化补 /v1", h.normalizeOpenAiBase("https://cpa.example.com"), "https://cpa.example.com/v1");
     eq("base 归一化去尾斜杠", h.normalizeOpenAiBase("https://cpa.example.com/v1/"), "https://cpa.example.com/v1");
     eq("base 归一化保留已有版本段", h.normalizeOpenAiBase("https://cpa.example.com/api/v2"), "https://cpa.example.com/api/v2");
+    check("直连普通总预算放宽至 300s", rawDirectBlock.includes("const DIRECT_TOTAL_BUDGET = 300;"));
+    check("直连听力总预算放宽至 420s", rawDirectBlock.includes("const DIRECT_AUDIO_TOTAL_BUDGET = 420;"));
+    check("直连普通/听力副路宽限放宽至 60s/90s", rawDirectBlock.includes("const DIRECT_PAIR_GRACE = 60;") && rawDirectBlock.includes("const DIRECT_AUDIO_PAIR_GRACE = 90;"));
+    check("直连最低仲裁剩余预算为 20s", rawDirectBlock.includes("const DIRECT_MIN_ARBITRATE_BUDGET = 20;"));
+    check("STT 超时放宽至 120s", rawDirectBlock.includes("const STT_REQUEST_TIMEOUT = 120e3;"));
   }
 
   // 2. SSE 解析

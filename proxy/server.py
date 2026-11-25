@@ -14,7 +14,7 @@
     Authorization: Bearer {CPA_API_KEY}
 
 要点：
-  * 客户端硬编码 timeout=90s（听力 180s），服务端总预算必须小于它，否则客户端先放弃 → nginx 记 499。
+  * 客户端硬编码 timeout=240s（听力 360s），服务端总预算必须小于它，否则客户端先放弃 → nginx 记 499。
   * 上游一律走**流式**：CPA 的 antigravity 非流式路径比流式慢约 34%，且尾延迟会长到几十秒；
     流式还能吃到 CPA 的 `: keep-alive` SSE 保活帧（默认 15s 一个），慢的时候不会把连接静默掐死。
   * values 必须是选项**原文**——客户端用 Levenshtein>=85 匹配，模型改写一个字就掉到阈值下。
@@ -515,10 +515,10 @@ async def search(req: SearchRequest, api_key: str = Depends(resolve_api_key)) ->
     audio_mode = resolve_audio_mode(req)
     transcript = (req.audio_transcript or "").strip()
     needs_server_stt = (audio_mode == "stt" and has_raw_audio and not transcript)
-    # 整条链路的墙钟总预算：双路并行 + 第三路仲裁共享，必须小于客户端超时(90s/180s)
+    # 整条链路的墙钟总预算：双路并行 + 第三路仲裁共享，必须小于客户端超时(240s/360s)
     total_budget = (
         upstream.CPA_AUDIO_TOTAL_BUDGET
-        if (has_raw_audio and (audio_mode == "llm" or needs_server_stt))
+        if ((has_raw_audio and (audio_mode == "llm" or needs_server_stt)) or transcript)
         else upstream.CPA_TOTAL_BUDGET
     )
     deadline = time.monotonic() + total_budget
@@ -584,7 +584,7 @@ async def search(req: SearchRequest, api_key: str = Depends(resolve_api_key)) ->
         + "\n\n【独立复核审题要求】：请仔细核对题目中的否定词、转折词、限定条件与时态细节，排除表面干扰项，给出最确凿的正确答案。"
     )
     pair_grace = (
-        (upstream.CPA_AUDIO_PAIR_GRACE if has_audio else upstream.CPA_PAIR_GRACE)
+        (upstream.CPA_AUDIO_PAIR_GRACE if (has_audio or transcript) else upstream.CPA_PAIR_GRACE)
         if DOUBLE_CHECK_ARBITRATE
         else None
     )

@@ -1,5 +1,25 @@
 # CHANGELOG — tiku-proxy（题库代理）
 
+## [Unreleased] 2026-11-25 — 放宽长思考模型超时预算，消除客户端 110s 提前掐断导致的 499
+
+### 背景
+
+2026-11-25 18:18 ~ 18:22（CST），脚本直连上游网关 `/v1` 调用 `step-5-preview` 等长思考模型处理长题（`5.7~8.9 KB`）时出现 4 条 `499 agent_canceled`：上游连接正常（`ttft_ms` 仅 `0.67s~2.90s`），但在 `110s` 内持续流式输出 `10,899~13,113` 隐藏思考 token、尚未吐出正文即被脚本 `DIRECT_TOTAL_BUDGET = 110s` 同时 `abort()`；同批长题切到 `deepseek-v4.1-flash`（`effort=high`）双路 + 第 3 路仲裁也已达 `~83s`，逼近原上限。反代与上游网关侧均无超时截断。
+
+### 改动
+
+- **`tangwg学习通.user.js`（0.9.0 → 0.9.1）**：
+  - 直连模式预算：`DIRECT_TOTAL_BUDGET` `110s → 300s`、`DIRECT_AUDIO_TOTAL_BUDGET` `200s → 420s`、`DIRECT_PAIR_GRACE` `20s → 60s`、`DIRECT_AUDIO_PAIR_GRACE` `35s → 90s`、`DIRECT_MIN_ARBITRATE_BUDGET` `12s → 20s`、`STT_REQUEST_TIMEOUT` `60s → 120s`。
+  - 代理模式客户端超时：`requestTimeout` 从 `90s / 180s` 放宽至 `240s / 360s`（携带 `audio_transcript` 的长听力复合题也适用 `360s`）。
+- **`proxy/upstream.py`、`proxy/server.py`、`proxy/.env.example`、`proxy/nginx.conf`**：
+  - 服务端默认预算同步放宽并严格低于客户端超时：`CPA_TIMEOUT` / `CPA_TOTAL_BUDGET` `75s → 210s`、`CPA_AUDIO_TIMEOUT` / `CPA_AUDIO_TOTAL_BUDGET` `160s → 330s`、`CPA_PAIR_GRACE` `20s → 60s`、`CPA_AUDIO_PAIR_GRACE` `35s → 90s`、`CPA_MIN_ARBITRATE_BUDGET` `12s → 20s`、`CPA_READ_TIMEOUT` `30s → 60s`、`STT_TIMEOUT` `60s → 120s`。
+  - `server.py` 对已带 `audio_transcript` 的听力复合题统一复用 `CPA_AUDIO_TOTAL_BUDGET` 与 `CPA_AUDIO_PAIR_GRACE`。
+  - 修正仓库 `proxy/nginx.conf` 模板过期的 `proxy_read_timeout 20s` 为 `420s`（加 `proxy_send_timeout 420s` 与 `proxy_buffering off`）。
+- **`direct_mode_test.mjs`、`proxy/README.md`、`llms.txt`**：
+  - 更新宽限常量替换正则并新增 5 项新超时预算基线断言；同步更新文档与索引中的超时说明。
+
+---
+
 ## [Unreleased] 2026-11-16 — 接入 DIY STT 语音转文字链路，面板支持「大模型直听 / STT 转文字」切换与悬浮说明
 
 ### 开源发布与检索优化（2026-11-17）

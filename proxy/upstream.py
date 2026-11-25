@@ -20,24 +20,24 @@ from pydantic import BaseModel
 
 CPA_BASE_URL = os.getenv("CPA_BASE_URL", "https://你的CPA地址/v1").rstrip("/")
 CPA_MODEL = os.getenv("CPA_MODEL", "gemini-3.8-flash-high")
-CPA_TIMEOUT = float(os.getenv("CPA_TIMEOUT", "75"))             # 单次尝试墙钟预算(秒)
-CPA_AUDIO_TIMEOUT = float(os.getenv("CPA_AUDIO_TIMEOUT", "160"))  # 听力单次尝试墙钟预算(秒)
+CPA_TIMEOUT = float(os.getenv("CPA_TIMEOUT", "210"))            # 单次尝试墙钟预算(秒)
+CPA_AUDIO_TIMEOUT = float(os.getenv("CPA_AUDIO_TIMEOUT", "330"))  # 听力单次尝试墙钟预算(秒)
 CPA_RETRIES = int(os.getenv("CPA_RETRIES", "1"))                # 总尝试次数
 # 流式开关：CPA 的 antigravity 非流式路径(operation=generate)实测比流式(operation=generate_stream)
 # 慢约 34%，且尾延迟会长到几十秒；改流式后还能吃到 CPA 的 `: keep-alive` SSE 保活帧。
 CPA_STREAM = os.getenv("CPA_STREAM", "true").lower() in ("true", "1", "yes")
-# 单次 socket 读超时：必须大于 CPA 的 streaming.keepalive-seconds(15s)，否则保活帧来不及续命就被误杀。
-CPA_READ_TIMEOUT = float(os.getenv("CPA_READ_TIMEOUT", "30"))
-# 整个搜题请求的墙钟总预算：必须小于油猴脚本的客户端超时(普通 90s / 听力 180s)，
-# 否则服务端还在跑、客户端先放弃，nginx 会记 499。默认留 15s/20s 余量给响应回程与网络抖动。
-CPA_TOTAL_BUDGET = float(os.getenv("CPA_TOTAL_BUDGET", "75"))
-CPA_AUDIO_TOTAL_BUDGET = float(os.getenv("CPA_AUDIO_TOTAL_BUDGET", "160"))
+# 单次 socket 读超时：必须大于 CPA 的 streaming.keepalive-seconds(15s)，适当放宽兼容无保活帧的长思考上游。
+CPA_READ_TIMEOUT = float(os.getenv("CPA_READ_TIMEOUT", "60"))
+# 整个搜题请求的墙钟总预算：必须小于油猴脚本的客户端超时(普通 240s / 听力 360s)，
+# 否则服务端还在跑、客户端先放弃，nginx 会记 499。默认留 30s 余量给响应回程与网络抖动。
+CPA_TOTAL_BUDGET = float(os.getenv("CPA_TOTAL_BUDGET", "210"))
+CPA_AUDIO_TOTAL_BUDGET = float(os.getenv("CPA_AUDIO_TOTAL_BUDGET", "330"))
 # 双路并行协同宽限：其中一路拿到有效答案后，最多再等另一路多少秒；超时即掐掉慢路，
-# 避免被单路上游卡死拖满整场预算(90s 撞车 499)。
-CPA_PAIR_GRACE = float(os.getenv("CPA_PAIR_GRACE", "20"))
-CPA_AUDIO_PAIR_GRACE = float(os.getenv("CPA_AUDIO_PAIR_GRACE", "35"))
+# 避免被单路上游卡死拖满整场预算，同时给长思考模型留足双路自然耗时差。
+CPA_PAIR_GRACE = float(os.getenv("CPA_PAIR_GRACE", "60"))
+CPA_AUDIO_PAIR_GRACE = float(os.getenv("CPA_AUDIO_PAIR_GRACE", "90"))
 # 剩余预算低于该阈值时跳过第 3 路仲裁，直接回退已有单路答案。
-CPA_MIN_ARBITRATE_BUDGET = float(os.getenv("CPA_MIN_ARBITRATE_BUDGET", "12"))
+CPA_MIN_ARBITRATE_BUDGET = float(os.getenv("CPA_MIN_ARBITRATE_BUDGET", "20"))
 # 思考强度透传：普通双路默认 low（靠双路一致保准确率、砍掉慢账号长思考尾延迟）；
 # 分歧时第 3 路仲裁默认 medium；不需要该字段的上游可在 .env 设为空字符串。
 CPA_REASONING_EFFORT = os.getenv("CPA_REASONING_EFFORT", "low").strip()
@@ -49,7 +49,7 @@ MODEL_LIST_TTL = float(os.getenv("MODEL_LIST_TTL", "300"))
 STT_BASE_URL = os.getenv("STT_BASE_URL", "").strip().rstrip("/")
 STT_API_KEY = os.getenv("STT_API_KEY", "").strip()
 STT_MODEL = os.getenv("STT_MODEL", "").strip()
-STT_TIMEOUT = float(os.getenv("STT_TIMEOUT", "60"))
+STT_TIMEOUT = float(os.getenv("STT_TIMEOUT", "120"))
 DEFAULT_AUDIO_MODE = os.getenv("DEFAULT_AUDIO_MODE", "llm").strip().lower()
 if DEFAULT_AUDIO_MODE not in ("llm", "stt"):
     DEFAULT_AUDIO_MODE = "llm"
