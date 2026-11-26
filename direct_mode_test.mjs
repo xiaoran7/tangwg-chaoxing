@@ -645,6 +645,312 @@ const run = async () => {
       CONFIG.queryApis[0].model = prevModel;
       CONFIG.queryApis[0].reasoningEffort = "auto";
     }
+
+    // 24. 判断题 TRUE/FALSE（英文/中文页面）自动勾选回归测试
+    {
+      const handlerBlock = sliceBetween("class BaseQuestionHandler {", "const useCxChapterLogic = () => {");
+      const __publicField = (obj, key, value) => { obj[key] = value; return value; };
+      const fakeWindow = { location: { href: "https://mooc1.chaoxing.com/work" } };
+      const fakeDocument = {};
+      const useQuestionStore = () => ({ addQuestion() {} });
+      const { CxQuestionHandler, extractJudgementToken } = new Function(
+        "__publicField",
+        "document",
+        "_unsafeWindow",
+        "useConfigStore",
+        "useLogStore",
+        "useQuestionStore",
+        `${textHelpers}\n${handlerBlock}\nreturn { CxQuestionHandler, extractJudgementToken };`,
+      )(__publicField, fakeDocument, fakeWindow, useConfigStore, useLogStore, useQuestionStore);
+
+      eq("extractJudgementToken 识别 TRUE/FALSE 与带空格选项前缀", [
+        extractJudgementToken(null, "TRUE"),
+        extractJudgementToken(null, "FALSE"),
+        extractJudgementToken(null, "A TRUE"),
+        extractJudgementToken(null, "B FALSE"),
+        extractJudgementToken(null, "A TRUE选择"),
+        extractJudgementToken(null, "B FALSE选择"),
+      ], ["对", "错", "对", "错", "对", "错"]);
+
+      const makeMockOpt = ({ text = "", attrs = {}, spanData = null, label = "" } = {}) => {
+        let clicked = 0;
+        let selected = false;
+        const spanEl = spanData ? {
+          _clicked: 0,
+          matches: (sel) => sel === `span[data='${spanData}']`,
+          getAttribute: (k) => (k === "data" ? spanData : null),
+          querySelector: (sel) => (sel === ".check_answer" && selected ? {} : null),
+          click() { this._clicked += 1; selected = true; },
+        } : null;
+        const el = {
+          textContent: text,
+          classList: { contains: (c) => selected && c === "check_answer" },
+          getAttribute: (k) => (k === "aria-checked" ? (selected ? "true" : "false") : (attrs[k] ?? null)),
+          matches: () => false,
+          querySelector: (sel) => {
+            if (spanEl && sel === `span[data='${spanData}']`) return spanEl;
+            if (sel.includes(".check_answer") && selected) return {};
+            if (sel.includes(".num_option") && label) {
+              return { textContent: label, click() { clicked += 1; selected = true; }, getAttribute: () => null };
+            }
+            return null;
+          },
+          querySelectorAll: () => (spanEl ? [spanEl] : []),
+          click() { clicked += 1; selected = true; },
+          get clickedCount() { return clicked + (spanEl ? spanEl._clicked : 0); },
+          get isSelected() { return selected; },
+        };
+        return el;
+      };
+
+      // 场景 A：新版作业英文界面 A TRUE / B FALSE，题型为 "3"，答案为 "对" / "错"
+      const handlerZy = new CxQuestionHandler("zy");
+      const optTrue = makeMockOpt({ text: "A TRUE", label: "A", attrs: { "aria-label": "A TRUE" } });
+      const optFalse = makeMockOpt({ text: "B FALSE", label: "B", attrs: { "aria-label": "B FALSE" } });
+      handlerZy.fillQuestion({
+        type: "3",
+        options: { TRUE: optTrue, A: optTrue, FALSE: optFalse, B: optFalse },
+        answer: ["对"],
+      });
+      eq("英文作业判断题 type=3 答案「对」选中 TRUE", [optTrue.isSelected, optFalse.isSelected], [true, false]);
+
+      const optTrue2 = makeMockOpt({ text: "A TRUE", label: "A" });
+      const optFalse2 = makeMockOpt({ text: "B FALSE", label: "B" });
+      handlerZy.fillQuestion({
+        type: "3",
+        options: { TRUE: optTrue2, A: optTrue2, FALSE: optFalse2, B: optFalse2 },
+        answer: ["错"],
+      });
+      eq("英文作业判断题 type=3 答案「错」选中 FALSE", [optTrue2.isSelected, optFalse2.isSelected], [false, true]);
+
+      // 场景 B：即使被误判成单选题 type=0，二选一 TRUE/FALSE 仍能等价匹配「对」/「错」
+      const optTrue3 = makeMockOpt({ text: "A TRUE", label: "A" });
+      const optFalse3 = makeMockOpt({ text: "B FALSE", label: "B" });
+      handlerZy.fillQuestion({
+        type: "0",
+        options: { TRUE: optTrue3, A: optTrue3, FALSE: optFalse3, B: optFalse3 },
+        answer: ["错"],
+      });
+      eq("type=0 二选一 TRUE/FALSE 答案「错」选中 FALSE", [optTrue3.isSelected, optFalse3.isSelected], [false, true]);
+
+      // 场景 C：中文作业 aria-label="对选择"/"错选择" 与考试页 span[data='true'/'false'] 保持正常
+      const optCnT = makeMockOpt({ text: "对", attrs: { "aria-label": "对选择" } });
+      const optCnF = makeMockOpt({ text: "错", attrs: { "aria-label": "错选择" } });
+      handlerZy.fillQuestion({ type: "3", options: { 对: optCnT, 错: optCnF }, answer: ["TRUE"] });
+      eq("中文作业判断题答案 TRUE 选中「对」", [optCnT.isSelected, optCnF.isSelected], [true, false]);
+
+      const handlerKs = new CxQuestionHandler("ks");
+      const optKsT = makeMockOpt({ text: "TRUE", spanData: "true" });
+      const optKsF = makeMockOpt({ text: "FALSE", spanData: "false" });
+      handlerKs.fillQuestion({ type: "3", options: { TRUE: optKsT, FALSE: optKsF }, answer: ["错"] });
+      eq("考试页判断题 span[data='false'] 答案「错」正常点击", [optKsT.isSelected, optKsF.isSelected], [false, true]);
+
+      // 场景 D：含 <sub>/<sup>/HTML 实体的电路/数学公式选项（如 u<sub>O</sub>=-2u<sub>I1</sub>-2u<sub>I2</sub>+5u<sub>I3</sub>）
+      const optF1 = makeMockOpt({ text: "A uO=-2uI1-2uI2+5uI3", label: "A" });
+      const optF2 = makeMockOpt({ text: "B uO=2uI1+2uI2+5uI3", label: "B" });
+      const optF3 = makeMockOpt({ text: "C uO=-2uI1+2uI2-5uI3", label: "C" });
+      const optF4 = makeMockOpt({ text: "D uO=-2uI1-2uI2-5uI3", label: "D" });
+      handlerZy.fillQuestion({
+        type: "0",
+        options: {
+          "u<sub>O</sub>=&minus;2u<sub>I1</sub>&minus;2u<sub>I2</sub>+5u<sub>I3</sub>": optF1,
+          A: optF1,
+          "u<sub>O</sub>=2u<sub>I1</sub>+2u<sub>I2</sub>+5u<sub>I3</sub>": optF2,
+          B: optF2,
+          "u<sub>O</sub>=&minus;2u<sub>I1</sub>+2u<sub>I2</sub>&minus;5u<sub>I3</sub>": optF3,
+          C: optF3,
+          "u<sub>O</sub>=&minus;2u<sub>I1</sub>&minus;2u<sub>I2</sub>&minus;5u<sub>I3</sub>": optF4,
+          D: optF4,
+        },
+        answer: ["uO=-2uI1-2uI2+5uI3"],
+      });
+      eq("含 <sub> 与 &minus; 实体的公式选项精确选中 A", [optF1.isSelected, optF2.isSelected, optF3.isSelected, optF4.isSelected], [true, false, false, false]);
+
+      // 场景 E：含 <sup> 公式与字母 b/c 的答案不得被单字母快捷索引 "B"/"C" 截胡
+      const optS1 = makeMockOpt({ text: "A a2+b2=c2", label: "A" });
+      const optS2 = makeMockOpt({ text: "B x2-y2=1", label: "B" });
+      const optS3 = makeMockOpt({ text: "C x3+y3=0", label: "C" });
+      handlerZy.fillQuestion({
+        type: "0",
+        options: {
+          "a<sup>2</sup>+b<sup>2</sup>=c<sup>2</sup>": optS1,
+          A: optS1,
+          "x<sup>2</sup>-y<sup>2</sup>=1": optS2,
+          B: optS2,
+          "x<sup>3</sup>+y<sup>3</sup>=0": optS3,
+          C: optS3,
+        },
+        answer: ["a2+b2=c2"],
+      });
+      eq("含 <sup> 且答案包含字母 b/c 时精确选中 A 不被 B/C 截胡", [optS1.isSelected, optS2.isSelected, optS3.isSelected], [true, false, false]);
+
+      // 场景 F：直连 snapToOptions 在 Unicode 负号 − 与 ASCII - 混用时仍精确吸附到唯一正解（不因平局误选 A）
+      const hSnap = buildHarness(() => ({ abort() {} }));
+      const circuitOpts = [
+        "uO=−2uI1−2uI2+5uI3",
+        "uO=2uI1+2uI2+5uI3",
+        "uO=−2uI1+2uI2−5uI3",
+        "uO=−2uI1−2uI2−5uI3",
+      ];
+      eq("Unicode 负号公式选项精确吸附到 D 不误选 A", hSnap.snapToOptions("uO=-2uI1-2uI2-5uI3", circuitOpts), circuitOpts[3]);
+
+      // 场景 G：懒加载占位图 <img> 取 data-original，避免两道不同图片题在缓存里撞车
+      const mockLazyImg = {
+        nodeType: 1,
+        tagName: "IMG",
+        childNodes: [],
+        getAttribute: (k) => ({ src: "/images/loading.gif", "data-original": "https://cdn.example.com/circuit-10.png" }[k] ?? null),
+      };
+      const { extractRawTextFromElement } = new Function(`${textHelpers}\nreturn { extractRawTextFromElement };`)();
+      eq("懒加载占位图优先取 data-original", extractRawTextFromElement(mockLazyImg), '<img src="https://cdn.example.com/circuit-10.png">');
+
+      // 场景 H：复合题漏答第 2 小题（带编号 1./3. 或 第1题/第3题）按题号精准落位，不向前顺移乱序
+      const g1A = makeMockOpt({ text: "A Apple", label: "A" });
+      const g1B = makeMockOpt({ text: "B Banana", label: "B" });
+      const g2A = makeMockOpt({ text: "A Red", label: "A" });
+      const g2B = makeMockOpt({ text: "B Blue", label: "B" });
+      const g3A = makeMockOpt({ text: "A Library", label: "A" });
+      const g3B = makeMockOpt({ text: "B Park", label: "B" });
+      const g4A = makeMockOpt({ text: "A Monday", label: "A" });
+      const g4B = makeMockOpt({ text: "B Friday", label: "B" });
+      handlerZy.fillQuestion({
+        type: "8",
+        options: {},
+        subOptionGroups: [
+          { Apple: g1A, A: g1A, Banana: g1B, B: g1B },
+          { Red: g2A, A: g2A, Blue: g2B, B: g2B },
+          { Library: g3A, A: g3A, Park: g3B, B: g3B },
+          { Monday: g4A, A: g4A, Friday: g4B, B: g4B },
+        ],
+        answer: ["1. A", "3. B", "4. A"],
+      });
+      eq("复合题带编号漏答第 2 小题不顺移（1->A, 2跳过, 3->B, 4->A）",
+        [g1A.isSelected, g2A.isSelected, g2B.isSelected, g3B.isSelected, g4A.isSelected],
+        [true, false, false, true, true]);
+
+      // 场景 I：复合题漏答第 2 小题且未带编号、但返回唯一选项原文时，按单调唯一精确匹配归位不乱序
+      const u1A = makeMockOpt({ text: "A Apple", label: "A" });
+      const u1B = makeMockOpt({ text: "B Banana", label: "B" });
+      const u2A = makeMockOpt({ text: "A Red", label: "A" });
+      const u2B = makeMockOpt({ text: "B Blue", label: "B" });
+      const u3A = makeMockOpt({ text: "A Library", label: "A" });
+      const u3B = makeMockOpt({ text: "B Park", label: "B" });
+      const u4A = makeMockOpt({ text: "A Monday", label: "A" });
+      const u4B = makeMockOpt({ text: "B Friday", label: "B" });
+      handlerZy.fillQuestion({
+        type: "8",
+        options: {},
+        subOptionGroups: [
+          { Apple: u1A, A: u1A, Banana: u1B, B: u1B },
+          { Red: u2A, A: u2A, Blue: u2B, B: u2B },
+          { Library: u3A, A: u3A, Park: u3B, B: u3B },
+          { Monday: u4A, A: u4A, Friday: u4B, B: u4B },
+        ],
+        answer: ["Apple", "Library", "Monday"],
+      });
+      eq("复合题无编号原文漏答第 2 小题按唯一选项归位不顺移",
+        [u1A.isSelected, u2A.isSelected, u2B.isSelected, u3A.isSelected, u4A.isSelected],
+        [true, false, false, true, true]);
+
+      // 场景 J：普通单选题题干含 (1)/(2) 段落且只有 1 组 A/B/C/D，不得误拆为 2 道复合小题
+      const makeOrderNode = (order, extra = {}) => ({
+        nodeType: 1,
+        children: [],
+        childNodes: [],
+        tagName: extra.tagName || "DIV",
+        textContent: extra.text || "",
+        innerHTML: extra.html ?? extra.text ?? "",
+        classList: { contains: (c) => (extra.classes || []).includes(c) },
+        getAttribute: (k) => (extra.attrs || {})[k] ?? null,
+        matches: (sel) => (extra.matches || []).some((m) => sel.includes(m)),
+        closest: () => null,
+        contains: () => false,
+        compareDocumentPosition: (other) => (order < other._order ? 4 : 2),
+        querySelector: extra.querySelector || (() => null),
+        querySelectorAll: extra.querySelectorAll || (() => []),
+        cloneNode: () => ({ querySelectorAll: () => [], nodeType: 1, tagName: "DIV", childNodes: [] }),
+        _order: order,
+        ...extra,
+      });
+      const stemP1 = makeOrderNode(1, { tagName: "P", text: "(1) 串联电路电流相等" });
+      const stemP2 = makeOrderNode(2, { tagName: "P", text: "(2) 并联电路电压相等" });
+      const singleOpts = ["A", "B", "C", "D"].map((lbl, i) => {
+        const numSpan = { textContent: lbl, getAttribute: () => lbl };
+        const ansP = { innerHTML: `选项${lbl}`, textContent: `选项${lbl}`, nodeType: 1, tagName: "DIV", childNodes: [{ nodeType: 3, nodeValue: `选项${lbl}` }] };
+        return makeOrderNode(10 + i, {
+          text: `${lbl} 选项${lbl}`,
+          classes: ["answerBg"],
+          querySelector: (sel) => (sel.includes(".answer_p") ? ansP : (sel.includes(".num_option") ? numSpan : null)),
+        });
+      });
+      const fakeSingleQuestionEl = makeOrderNode(0, {
+        text: "下列说法正确的是：(1) 串联电路电流相等 (2) 并联电路电压相等",
+        querySelectorAll: (sel) => {
+          if (sel === "h3") return [makeOrderNode(0, { tagName: "H3", text: "1. 下列说法正确的是：", childNodes: [{ nodeType: 3, nodeValue: "1. 下列说法正确的是：" }], cloneNode: () => ({ querySelectorAll: () => [], nodeType: 1, tagName: "H3", childNodes: [{ nodeType: 3, nodeValue: "1. 下列说法正确的是：" }] }) })];
+          if (sel === ".answerBg") return singleOpts;
+          if (sel.includes(".reader_answer_tit")) return [stemP1, stemP2];
+          return [];
+        },
+      });
+      const handlerSingle = new CxQuestionHandler("zy");
+      handlerSingle.addQuestions([fakeSingleQuestionEl]);
+      eq("普通单选题题干含 (1)/(2) 保持单选题不误拆复合题",
+        [handlerSingle.questions[0].type, handlerSingle.questions[0].subOptionGroups.length, handlerSingle.questions[0].searchText.options.length],
+        ["0", 0, 4]);
+
+      // 场景 K：填空题过滤 display:none 与 UEditor 工具栏隐藏 input，且支持 第N空 精准落位不顺移
+      const makeMockInput = ({ type = "text", display = "", inEditor = false } = {}) => ({
+        nodeType: 1,
+        value: "",
+        disabled: false,
+        hidden: false,
+        style: { display, visibility: "" },
+        getAttribute: (k) => (k === "type" ? type : null),
+        closest: (sel) => (inEditor && sel.includes(".edui-toolbar") ? {} : null),
+        dispatchEvent() {},
+      });
+      const hiddenInput = makeMockInput({ display: "none" });
+      const editorInput = makeMockInput({ inEditor: true });
+      const blank1 = makeMockInput();
+      const blank2 = makeMockInput();
+      const blank3 = makeMockInput();
+      const mockFillEl = {
+        querySelectorAll: (sel) => (sel === "input" ? [hiddenInput, editorInput, blank1, blank2, blank3] : []),
+      };
+      handlerZy.fillQuestion({
+        type: "2",
+        element: mockFillEl,
+        options: {},
+        answer: ["第1空：牛顿", "第3空：法拉第"],
+      });
+      eq("填空题忽略隐藏/编辑器 input 且按 第N空 落位不顺移",
+        [hiddenInput.value, editorInput.value, blank1.value, blank2.value, blank3.value],
+        ["", "", "牛顿", "", "法拉第"]);
+
+      // 场景 L：parseHtml 过滤嵌套 .questionLi，避免父子双解析导致题号错位
+      const nestedChildQ = { parentElement: null, matches: (s) => s === ".questionLi" };
+      const outerParentQ = { parentElement: null, matches: (s) => s === ".questionLi" };
+      nestedChildQ.parentElement = outerParentQ;
+      const standaloneQ = { parentElement: null, matches: (s) => s === ".questionLi" };
+      const handlerNested = new CxQuestionHandler("zy");
+      const capturedEls = [];
+      handlerNested._document = { querySelectorAll: () => [outerParentQ, nestedChildQ, standaloneQ] };
+      handlerNested.addQuestions = (els) => capturedEls.push(...els);
+      handlerNested.parseHtml();
+      eq("parseHtml 剔除嵌套 .questionLi 只保留顶层题项", capturedEls.length, 2);
+
+      // 场景 M：queryOptionElements 兜底规则不被英文填空题干 "A circuit..." 误触发
+      const engStemP = {
+        children: [],
+        textContent: "A circuit has R1 = 10kΩ.",
+        closest: (sel) => (sel.includes("h3") ? {} : null),
+        querySelector: () => null,
+      };
+      const engFillContainer = {
+        querySelectorAll: (sel) => (sel === "div, p" ? [engStemP] : []),
+      };
+      eq("英文题干 A circuit 不被 queryOptionElements 误判为选择题选项", handlerZy.queryOptionElements(engFillContainer).length, 0);
+    }
   }
 
   console.log();

@@ -1,5 +1,22 @@
 # CHANGELOG — tiku-proxy（题库代理）
 
+## [Unreleased] 2026-11-26 — 修复英文判断题、公式选项与复合/多空题错位回填（v0.9.2）
+
+### 改动
+
+- **`tangwg学习通.user.js`（0.9.1 → 0.9.2）**：
+  - **英文界面判断题回填**：将 `CxQuestionHandler.fillQuestion` 的 `type === "3"` 分支提前至常规选择之前，兼容英文页面 `A TRUE / B FALSE` 及带空格选项前缀，并在 `BaseQuestionHandler.findMatchedOption` 增加二选一判断语义等价匹配；同步修正智慧树判断题大小写匹配。
+  - **公式/上下标选项与防单字母截胡**：`normalizeOptionMatchText` 剥离 `<sub>`/`<sup>`/`<br>` 等残留标签、解码 `&minus;` 等 HTML 实体并统一数学负号/加号/等号；全局 `normalize` 同步归一 `−`/`＋`/`＝` 避免直连 `snapToOptions` 平局错选；禁止非纯字母答案命中 `extractOptions` 写入的单字母快捷索引（`A`/`B`/`C`/`D`），并将子串匹配保护提升至 `>= 2` 字符。
+  - **防错位/顺移回填加固**：
+    - 复合小题 `subOptionGroups` 优先按显式小题编号（`第N题:`、`1.`、`(1)`）精准落位；未带编号且答案少于小题数时按单调唯一精确选项匹配归位，避免漏答前面小题导致后续整体顺移；
+    - 限制仅有 1 组 `A` 选项或单一 `radio` 组的普通单选题不被题干 `(1)/(2)` 误拆为多道复合小题，并优化正文与真实小题均含 `(1)` 时的去重；
+    - 多空填空题新增 `getVisibleFillTextInputs` 过滤 `display:none` 与 UEditor 工具栏隐藏 `<input>`，将 `textarea` / `input` 改为互斥分支并支持 `第N空：` 按空位落位；
+    - `parseHtml` 过滤嵌套 `.questionLi`/`.TiMu` 仅保留顶层题项；收紧 `queryOptionElements` 文本兜底规则防止英文题干误判；`extractRawTextFromElement` 对懒加载占位图优先取 `data-original`/`data-src`；为 `fillQuestion` 增加单题异常保护并为智慧树 XHR 回调增加并发重入锁。
+- **`direct_mode_test.mjs`、`llms.txt`**：
+  - 新增 21 项回归断言（总计 128/128 通过），覆盖英文 `TRUE/FALSE`、公式 `<sub>`/`<sup>`/`&minus;`、Unicode 负号吸附、懒加载图、复合题漏答编号/无编号归位、单选题 `(1)/(2)` 防误拆、隐藏输入框过滤、嵌套题去重与英文题干防护。
+
+---
+
 ## [Unreleased] 2026-11-25 — 放宽长思考模型超时预算，消除客户端 110s 提前掐断导致的 499
 
 ### 背景

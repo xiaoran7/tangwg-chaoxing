@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tangwg学习通（超星学习通｜知到智慧树 AI 答题与听力 STT 助手）
 // @namespace    noshuang
-// @version      0.9.1
+// @version      0.9.2
 // @author       tangwg
 // @description  超星学习通、知到智慧树网课辅助脚本：支持免部署直连 OpenAI 兼容大模型与自建题库代理、Deepgram/Whisper STT 英语听力转文字、Flash 模型自动 High 思考强度、双路 AI 复核与第 3 路仲裁
 // @homepageURL  https://github.com/xiaoran7/tangwg-chaoxing
@@ -203,7 +203,10 @@
       const current = node;
       const tag = current.tagName.toLowerCase();
       if (tag === "img") {
-        const src = current.getAttribute("src");
+        const rawSrc = current.getAttribute("src");
+        const lazySrc = current.getAttribute("data-original") || current.getAttribute("data-src");
+        const isPlaceholder = !rawSrc || /^data:image\/gif/i.test(rawSrc) || /(?:blank|spacer|loading|placeholder|default)\.(?:gif|png|jpg|svg)/i.test(rawSrc);
+        const src = (isPlaceholder && lazySrc) ? lazySrc : (rawSrc ?? lazySrc);
         return src == null ? "<img>" : `<img src="${src}">`;
       }
       if (tag === "br")
@@ -254,12 +257,14 @@
         element.querySelectorAll("[aria-label],[data],[data-value],[value],[title]").forEach(collect);
       }
     }
-    const normalize2 = (value) => value.trim().toLowerCase().replace(/^[a-z0-9]+[.．、:：\]\)]\s*/i, "").replace(/[\s.．、:：()[\]{}]/g, "");
+    const normalize2 = (value) => value.trim().toLowerCase()
+      .replace(/^[a-z0-9]+(?:[.．、:：\]\)]\s*|\s+)/i, "")
+      .replace(/[\s.．、:：()（）[\]{}]/g, "");
     for (const value of values) {
       const normalized = normalize2(value);
-      if (/^(?:正确|是|对|√|t|true|right)$/.test(normalized) || /^(?:正确|是|对)选择$/.test(normalized))
+      if (/^(?:正确|是|对|√|✓|✔|t|true|right|yes)(?:选择)?$/.test(normalized))
         return "对";
-      if (/^(?:错误|否|错|×|x|f|false|wrong)$/.test(normalized) || /^(?:错误|否|错)选择$/.test(normalized))
+      if (/^(?:错误|否|错|×|✕|✘|x|f|false|wrong|no)(?:选择)?$/.test(normalized))
         return "错";
     }
     return "";
@@ -299,7 +304,7 @@
       }
     };
   };
-  const normalize = (text, document2) => stripOptionLabel(extractRawTextFromHtml(text, document2)).replace(/<img\s+src="([^"]*)">/g, "$1").replace(/[\s\u00a0]+/g, "").toLowerCase();
+  const normalize = (text, document2) => stripOptionLabel(extractRawTextFromHtml(text, document2)).replace(/<img\s+src="([^"]*)">/g, "$1").replace(/[−–—－]/g, "-").replace(/＋/g, "+").replace(/＝/g, "=").replace(/[\s\u00a0]+/g, "").toLowerCase();
   const similarity = (left, right) => {
     if (!left || !right)
       return 0;
@@ -7731,6 +7736,30 @@
         let bestElement = null;
         let bestScore = -1;
 
+        // 若当前题目的全部去重选项构成标准二选一判断题（如 TRUE/FALSE、对/错），优先按判断语义等价匹配
+        const ansJudgeToken = extractJudgementToken(null, rawAns);
+        if (ansJudgeToken) {
+          const uniqueOptionEls = /* @__PURE__ */ new Map();
+          for (const [optKey, rawOptEl] of Object.entries(options || {})) {
+            const optEl = toRawVal(rawOptEl);
+            if (!optEl) continue;
+            const existing = uniqueOptionEls.get(optEl);
+            const tok = extractJudgementToken(optEl, optKey) || (this.normalizeJudgementText(optKey) === "true" ? "对" : (this.normalizeJudgementText(optKey) === "false" ? "错" : ""));
+            if (!existing || (!existing.token && tok)) {
+              uniqueOptionEls.set(optEl, { token: tok });
+            }
+          }
+          if (uniqueOptionEls.size === 2) {
+            const tokens = Array.from(uniqueOptionEls.values()).map((entry) => entry.token);
+            if (tokens.includes("对") && tokens.includes("错")) {
+              for (const [optEl, entry] of uniqueOptionEls.entries()) {
+                if (entry.token === ansJudgeToken)
+                  return optEl;
+              }
+            }
+          }
+        }
+
         for (const [optionText, rawOptionElement] of Object.entries(options || {})) {
           const optionElement = toRawVal(rawOptionElement);
           if (!optionElement) continue;
@@ -7741,12 +7770,17 @@
             return optionElement;
           }
 
+          // extractOptions 会额外写入单字母快捷索引（如 "A": optEl），非纯字母答案绝不能拿单字母去做子串/模糊匹配，否则答案里含字母 a/b/c/d 会误点错项
+          if (/^[A-Za-z]$/.test(String(optionText || "").trim()) && optLabel && String(optionText).trim().toUpperCase() === optLabel && !pureLetter) {
+            continue;
+          }
+
           const normOpt = this.normalizeOptionMatchText(optionText);
           if (normOpt && normalizedAnswer && normOpt === normalizedAnswer) {
             return optionElement;
           }
 
-          if (normOpt && normalizedAnswer && (normOpt.includes(normalizedAnswer) || normalizedAnswer.includes(normOpt))) {
+          if (normOpt && normalizedAnswer && normOpt.length >= 2 && normalizedAnswer.length >= 2 && (normOpt.includes(normalizedAnswer) || normalizedAnswer.includes(normOpt))) {
             const score = 900 + Math.min(normOpt.length, normalizedAnswer.length);
             if (score > bestScore) {
               bestElement = optionElement;
@@ -7788,11 +7822,39 @@
           return "4";
         return "8";
       });
-      __publicField(this, "hasFillBlankControl", (questionElement) => {
-        const textInputs = Array.from(questionElement.querySelectorAll("input")).filter((input) => {
-          const type = (input.getAttribute("type") || "text").toLowerCase();
-          return ["", "text", "search", "number", "tel", "url", "email"].includes(type) && !input.disabled && !input.hidden;
+      __publicField(this, "getVisibleFillTextInputs", (container, allowedTypes = ["", "text", "search"]) => {
+        if (!container || typeof container.querySelectorAll !== "function")
+          return [];
+        const doc = container.ownerDocument || this._document;
+        const view = doc && doc.defaultView ? doc.defaultView : null;
+        return Array.from(container.querySelectorAll("input")).filter((input) => {
+          const type = (input.getAttribute ? (input.getAttribute("type") || "text") : (input.type || "text")).toLowerCase();
+          if (!allowedTypes.includes(type) || input.disabled || input.hidden)
+            return false;
+          if (input.getAttribute && input.getAttribute("aria-hidden") === "true")
+            return false;
+          if (input.closest && input.closest(".edui-editor, .edui-toolbar, .edui-dialog, [hidden], [aria-hidden='true']"))
+            return false;
+          let cur = input;
+          while (cur && cur !== container.parentElement) {
+            if (cur.hidden)
+              return false;
+            if (cur.style && (cur.style.display === "none" || cur.style.visibility === "hidden"))
+              return false;
+            if (view && typeof view.getComputedStyle === "function" && cur.nodeType === 1) {
+              try {
+                const cs = view.getComputedStyle(cur);
+                if (cs && (cs.display === "none" || cs.visibility === "hidden"))
+                  return false;
+              } catch {}
+            }
+            cur = cur.parentElement;
+          }
+          return true;
         });
+      });
+      __publicField(this, "hasFillBlankControl", (questionElement) => {
+        const textInputs = this.getVisibleFillTextInputs(questionElement, ["", "text", "search", "number", "tel", "url", "email"]);
         const textareas = questionElement.querySelectorAll("textarea");
         const editableElements = questionElement.querySelectorAll('[contenteditable="true"]');
         const inputLikeElements = questionElement.querySelectorAll('input, textarea, [contenteditable="true"]');
@@ -7885,8 +7947,41 @@
           return 85;
         return Math.min(100, Math.max(0, threshold));
       });
+      __publicField(this, "decodeOptionHtmlEntities", (str) => {
+        const raw = String(str == null ? "" : str);
+        if (!raw.includes("&"))
+          return raw;
+        if (typeof document !== "undefined" && document && typeof document.createElement === "function") {
+          try {
+            const ta = document.createElement("textarea");
+            ta.innerHTML = raw;
+            return ta.value;
+          } catch {}
+        }
+        const named = {
+          nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+          minus: "-", plus: "+", times: "×", divide: "÷", plusmn: "±",
+          le: "≤", ge: "≥", ne: "≠", deg: "°", infin: "∞", radic: "√",
+          Omega: "Ω", omega: "ω", mu: "μ", pi: "π", alpha: "α", beta: "β",
+          gamma: "γ", delta: "δ", Delta: "Δ", theta: "θ", phi: "φ"
+        };
+        return raw
+          .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+          .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+          .replace(/&([a-zA-Z]+);/g, (full, name) => (Object.prototype.hasOwnProperty.call(named, name) ? named[name] : full));
+      });
       __publicField(this, "normalizeOptionMatchText", (text) => {
-        return this.clean(this.removeHtml(text)).replace(/<img\s+src=["']?([^"'>\s]+).*?>/gi, "$1").replace(/&[a-z]+;/gi, "").replace(/^[a-z]\s*[.．、：\]]\s*/i, "").replace(/[\s\u00a0]+/g, "").replace(/[,.，。、：；？！'""''「」【】《》（）()\[\]{}【】<>]/g, "").toLowerCase();
+        const cleaned = this.clean(this.removeHtml(text))
+          .replace(/<img\s+[^>]*src=["']?([^"'>\s]+).*?>/gi, "$1")
+          .replace(/<[^>]+>/g, "");
+        return this.decodeOptionHtmlEntities(cleaned)
+          .replace(/[−–—－]/g, "-")
+          .replace(/＋/g, "+")
+          .replace(/＝/g, "=")
+          .replace(/^[a-z]\s*[.．、：\]]\s*/i, "")
+          .replace(/[\s\u00a0]+/g, "")
+          .replace(/[,.，。、：；？！'""''「」【】《》（）()\[\]{}【】<>]/g, "")
+          .toLowerCase();
       });
       __publicField(this, "calculateTextSimilarity", (left, right) => {
         if (!left || !right)
@@ -7913,10 +8008,12 @@
         return distances[left.length];
       });
       __publicField(this, "normalizeJudgementText", (optionText) => {
-        const text = this.clean(optionText).replace(/[.．、：\s]/g, "").toLowerCase();
-        if (/^(a)?(正确|是|对|√|t|true|right)$/.test(text))
+        const cleaned = this.clean(optionText).trim().toLowerCase()
+          .replace(/^[a-z]\s*(?:[.．、:：\]\)]\s*|\s+)/i, "");
+        const text = cleaned.replace(/[.．、:：\s()（）[\]{}]/g, "");
+        if (/^(?:a(?=(?:正确|是|对|√|✓|✔|true|right)))?(?:正确|是|对|√|✓|✔|t|true|right|yes|ri)(?:选择)?$/.test(text))
           return "true";
-        if (/^(b)?(错误|否|错|×|x|f|false|wrong)$/.test(text))
+        if (/^(?:b(?=(?:错误|否|错|×|✕|✘|false|wrong)))?(?:错误|否|错|×|✕|✘|x|f|false|wrong|no|wr)(?:选择)?$/.test(text))
           return "false";
         return "";
       });
@@ -7951,7 +8048,11 @@
             if (values == null ? void 0 : values.length) {
               question.answer = values;
               question.answerStatus = "success";
-              this.fillQuestion(question);
+              try {
+                this.fillQuestion(question);
+              } catch (fillErr) {
+                this.addLog(`第${index + 1}道题自动填写异常，已跳过以继续后续题目：${fillErr instanceof Error ? fillErr.message : String(fillErr)}`, "warning");
+              }
               this.addLog(`第${index + 1}道题搜索成功`, "success");
               if ((_a = answerData.meta) == null ? void 0 : _a.check_detail) {
                 const logType = answerData.meta.check_status === "arbitrated" ? "warning" : "primary";
@@ -7972,11 +8073,20 @@
       __publicField(this, "parseHtml", () => {
         if (!this._document)
           return [];
+        const selectTopLevel = (selector) => Array.from(this._document.querySelectorAll(selector)).filter((el) => {
+          let parent = el.parentElement;
+          while (parent) {
+            if (typeof parent.matches === "function" && parent.matches(selector))
+              return false;
+            parent = parent.parentElement;
+          }
+          return true;
+        });
         if (["zj"].includes(this.type)) {
-          const questionElements = this._document.querySelectorAll(".TiMu");
+          const questionElements = selectTopLevel(".TiMu");
           this.addQuestions(questionElements);
         } else if (["zy", "ks"].includes(this.type)) {
-          const questionElements = this._document.querySelectorAll(".questionLi");
+          const questionElements = selectTopLevel(".questionLi");
           this.addQuestions(questionElements);
         }
       });
@@ -7992,7 +8102,7 @@
         // If already checked, return to avoid unchecking or duplicate toggles
         if (radio && radio.checked) return;
         if (optionElement.getAttribute && optionElement.getAttribute("aria-checked") === "true") return;
-        if ((optionElement.querySelector && (optionElement.querySelector(".check_answer") || optionElement.querySelector(".check_answer_dx"))) || (optionElement.classList && optionElement.classList.contains("check_answer"))) return;
+        if ((optionElement.querySelector && (optionElement.querySelector(".check_answer") || optionElement.querySelector(".check_answer_dx"))) || (optionElement.classList && (optionElement.classList.contains("check_answer") || optionElement.classList.contains("check_answer_dx")))) return;
 
         const clickable = (optionElement.querySelector && optionElement.querySelector(".answerBg, a.Cy_circle, span.Cy_circle, label, .num_option, [class*='num_option'], [class*='circle']"))
           || radio
@@ -8076,13 +8186,18 @@
         const inputs = Array.from(container.querySelectorAll("input[type='radio'], input[type='checkbox']"));
         if (inputs.length > 0) return inputs;
 
-        // 6. 首字符带 A/B/C/D 选项前缀的 div/p
+        // 6. 首字符带 A/B/C/D 选项前缀的 div/p（至少出现 A/B 两个不同大写选项且不在题干内，防止英文题干误判）
         const textOptionBlocks = Array.from(container.querySelectorAll("div, p")).filter((el) => {
           if (el.children.length > 3) return false;
+          if (el.closest && el.closest("h3, .fontLabel, .mark_name, .Zy_TItle, .Cy_TItle, .edui-editor")) return false;
+          if (el.querySelector && el.querySelector("textarea, input[type='text']")) return false;
           const txt = (el.textContent || "").trim();
-          return /^[A-Za-z][.、:：\s]/.test(txt);
+          return /^[A-Z][.．、:：\]]\s*\S/.test(txt);
         });
-        if (textOptionBlocks.length > 0) return textOptionBlocks;
+        if (textOptionBlocks.length >= 2) {
+          const letters = new Set(textOptionBlocks.map((el) => (el.textContent || "").trim()[0]));
+          if (letters.has("A") && letters.has("B")) return textOptionBlocks;
+        }
 
         return [];
       });
@@ -8104,16 +8219,149 @@
           if (rawQuestion.answer.length < subOptionGroups.length) {
             this.addLog(`[复合题警告] 页面共 ${subOptionGroups.length} 道小题，但模型只返回了 ${rawQuestion.answer.length} 个答案，可能有小题未作答`, "warning");
           }
-          rawQuestion.answer.forEach((subAns, index) => {
-            if (index >= subOptionGroups.length) return; // 严禁越界匹配，防止多余输出干扰前面的小题！
-            const subOpts = subOptionGroups[index];
-            let optionElement = subOpts ? this.findMatchedOption(subOpts, String(subAns)) : null;
+          const rawAnswers = rawQuestion.answer.map((a) => String(a ?? "").trim());
+          const groupCount = subOptionGroups.length;
+          const hasExactOptionText = (subOpts, text) => {
+            const normTarget = this.normalizeOptionMatchText(text);
+            if (!normTarget) return false;
+            for (const [optKey, rawOptEl] of Object.entries(subOpts || {})) {
+              const optEl = toRawVal(rawOptEl);
+              if (!optEl) continue;
+              const optLabel = this.getOptionLabel(optEl);
+              if (/^[A-Za-z]$/.test(String(optKey || "").trim()) && optLabel && String(optKey).trim().toUpperCase() === optLabel)
+                continue;
+              if (this.normalizeOptionMatchText(optKey) === normTarget)
+                return true;
+            }
+            return false;
+          };
+          const parsedIndexed = rawAnswers.map((ans) => {
+            const strong = ans.match(/^第\s*(\d+)\s*[题小题]\s*[:：]?\s*(.+)$/);
+            if (strong) {
+              const idx = Number(strong[1]) - 1;
+              if (idx >= 0 && idx < groupCount && strong[2].trim())
+                return { targetIdx: idx, value: strong[2].trim(), strong: true };
+            }
+            const weak = ans.match(/^(?:[（\(]\s*(\d+)\s*[）\)]|(\d+)\s*(?:[.．](?!\d)|[、:：\]]))\s*(.+)$/);
+            if (weak) {
+              const idx = Number(weak[1] || weak[2]) - 1;
+              if (idx >= 0 && idx < groupCount && weak[3].trim())
+                return { targetIdx: idx, value: weak[3].trim(), strong: false };
+            }
+            return null;
+          });
+          const allParsed = parsedIndexed.every(Boolean);
+          const uniqueTargetIndices = allParsed ? new Set(parsedIndexed.map((p) => p.targetIdx)) : null;
+          const allStrong = allParsed && uniqueTargetIndices.size === parsedIndexed.length && parsedIndexed.every((p) => p.strong);
+          const isStrictlyIncreasing = (arr) => arr.every((val, i) => i === 0 || val > arr[i - 1]);
+          const allWeakNumbered = allParsed
+            && !allStrong
+            && uniqueTargetIndices.size === parsedIndexed.length
+            && rawAnswers.length <= groupCount
+            && isStrictlyIncreasing(parsedIndexed.map((p) => p.targetIdx))
+            && parsedIndexed.some((p, i) => p.targetIdx !== i)
+            && !rawAnswers.every((ans, i) => i < groupCount && hasExactOptionText(subOptionGroups[i], ans));
+
+          let assignments = null;
+          if (allStrong || allWeakNumbered) {
+            assignments = parsedIndexed.map((p) => ({ targetIdx: p.targetIdx, value: p.value, display: p.value }));
+          } else if (rawAnswers.length < groupCount) {
+            const pureLetterRe = /^(?:选项\s*)?[A-Za-z][.、:：\s]*$/;
+            const exactGroups = rawAnswers.map((ans) => {
+              if (!ans || pureLetterRe.test(ans)) return null;
+              const hits = [];
+              for (let g = 0; g < groupCount; g++) {
+                if (hasExactOptionText(subOptionGroups[g], ans)) hits.push(g);
+              }
+              return hits.length === 1 ? hits[0] : null;
+            });
+            if (exactGroups.every((g) => g !== null) && isStrictlyIncreasing(exactGroups)) {
+              assignments = rawAnswers.map((ans, i) => ({ targetIdx: exactGroups[i], value: ans, display: ans }));
+            }
+          }
+          if (!assignments) {
+            assignments = rawAnswers
+              .slice(0, groupCount)
+              .map((ans, index) => ({ targetIdx: index, value: ans, display: ans }));
+          }
+          assignments.forEach(({ targetIdx, value, display }) => {
+            if (targetIdx < 0 || targetIdx >= groupCount) return; // 严禁越界匹配，防止多余输出干扰前面的小题！
+            const subOpts = subOptionGroups[targetIdx];
+            let optionElement = subOpts ? this.findMatchedOption(subOpts, value) : null;
             if (optionElement) {
               this.safeClickOption(optionElement);
             } else {
-              this.addLog(`[复合题警告] 第 ${index + 1} 小题答案「${String(subAns)}」未能匹配到页面选项，已跳过勾选`, "warning");
+              this.addLog(`[复合题警告] 第 ${targetIdx + 1} 小题答案「${display}」未能匹配到页面选项，已跳过勾选`, "warning");
             }
           });
+        } else if (rawQuestion.type === "3") {
+          const rawJudgeAns = String(rawQuestion.answer[0] ?? "").trim();
+          const judgeToken = extractJudgementToken(null, rawJudgeAns);
+          let answer = judgeToken === "错" ? "false" : (judgeToken === "对" ? "true" : "");
+          if (!answer) {
+            if (rawJudgeAns.match(/(^|,)(正确|是|对|√|✓|✔|T|ri|right|true|yes)(,|$)/i)) {
+              answer = "true";
+            } else if (rawJudgeAns.match(/(^|,)(错误|否|错|×|✕|✘|F|wr|wrong|false|no)(,|$)/i)) {
+              answer = "false";
+            } else {
+              answer = "true";
+            }
+          }
+          const targetToken = answer === "true" ? "对" : "错";
+          const trueOrFalse = {
+            "true": "对",
+            "false": "错"
+          };
+          const candidateEntries = [];
+          const seenEls = /* @__PURE__ */ new Set();
+          for (const key in questionOptions) {
+            const optEl = toRawVal(questionOptions[key]);
+            if (!optEl || seenEls.has(optEl)) continue;
+            seenEls.add(optEl);
+            candidateEntries.push([key, optEl]);
+          }
+          if (!candidateEntries.length && questionElement) {
+            for (const optEl of this.queryOptionElements(questionElement)) {
+              if (!optEl || seenEls.has(optEl)) continue;
+              seenEls.add(optEl);
+              candidateEntries.push([optEl.textContent || "", optEl]);
+            }
+          }
+          let clicked = false;
+          for (const [key, optEl] of candidateEntries) {
+            if (this.type === "ks") {
+              const span = optEl.matches && optEl.matches(`span[data='${answer}']`)
+                ? optEl
+                : (optEl.querySelector ? optEl.querySelector(`span[data='${answer}']`) : null);
+              if (span) {
+                if (span.querySelector && span.querySelector(".check_answer")) {
+                  clicked = true;
+                  break;
+                }
+                span.click();
+                clicked = true;
+                break;
+              }
+            }
+            const ariaLabel = (optEl.getAttribute && optEl.getAttribute("aria-label")) || "";
+            if (ariaLabel.includes(`${trueOrFalse[answer]}选择`)) {
+              this.safeClickOption(optEl);
+              clicked = true;
+              break;
+            }
+            const optToken = extractJudgementToken(optEl, key);
+            const normKey = this.normalizeJudgementText(key);
+            if (optToken === targetToken || normKey === answer) {
+              this.safeClickOption(optEl);
+              clicked = true;
+              break;
+            }
+          }
+          if (!clicked && candidateEntries.length === 2) {
+            const matched = this.findMatchedOption(questionOptions, rawJudgeAns);
+            if (matched)
+              this.safeClickOption(matched);
+          }
         } else if (["0", "1", "8"].includes(rawQuestion.type) || (questionOptions && Object.keys(questionOptions).length > 0)) {
           // 2. 常规单选、多选
           rawQuestion.answer.forEach((answer) => {
@@ -8130,58 +8378,45 @@
             }
           });
         } else if (rawQuestion.type === "2") {
-          const textareaElements = questionElement ? questionElement.querySelectorAll("textarea") : [];
+          const resolveBlankAssignments = (slotCount) => {
+            const rawAnswers = rawQuestion.answer.map((a) => String(a ?? ""));
+            const parsed = rawAnswers.map((ans) => {
+              const m = ans.trim().match(/^第\s*(\d+)\s*空\s*[:：]\s*(.+)$/);
+              if (!m) return null;
+              const idx = Number(m[1]) - 1;
+              return idx >= 0 && idx < slotCount ? { idx, val: m[2].trim() } : null;
+            });
+            if (parsed.length > 0 && parsed.every(Boolean) && new Set(parsed.map((p) => p.idx)).size === parsed.length) {
+              return parsed;
+            }
+            return rawAnswers.slice(0, slotCount).map((ans, idx) => {
+              const m = ans.trim().match(/^第\s*(\d+)\s*空\s*[:：]\s*(.+)$/);
+              return { idx, val: m ? m[2].trim() : ans };
+            });
+          };
+          const textareaElements = questionElement ? Array.from(questionElement.querySelectorAll("textarea")) : [];
           if (textareaElements.length > 0) {
-            textareaElements.forEach((textareaElement, index) => {
+            resolveBlankAssignments(textareaElements.length).forEach(({ idx, val }) => {
+              const textareaElement = textareaElements[idx];
+              if (!textareaElement) return;
               try {
                 const ueditor = this._window.UE.getEditor(textareaElement.name);
-                ueditor.setContent(String(rawQuestion.answer[index] ?? ""));
+                ueditor.setContent(val);
               } catch (e) {
-                textareaElement.value = String(rawQuestion.answer[index] ?? "");
+                textareaElement.value = val;
                 textareaElement.dispatchEvent(new Event("input", { bubbles: true }));
                 textareaElement.dispatchEvent(new Event("change", { bubbles: true }));
               }
             });
-          }
-          if (questionElement) {
-            const textInputs = Array.from(questionElement.querySelectorAll("input")).filter((input) => {
-              const type = (input.getAttribute("type") || "text").toLowerCase();
-              return ["", "text", "search"].includes(type) && !input.disabled && !input.hidden;
+          } else if (questionElement) {
+            const textInputs = this.getVisibleFillTextInputs(questionElement, ["", "text", "search"]);
+            resolveBlankAssignments(textInputs.length).forEach(({ idx, val }) => {
+              const inputElement = textInputs[idx];
+              if (!inputElement) return;
+              inputElement.value = val;
+              inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+              inputElement.dispatchEvent(new Event("change", { bubbles: true }));
             });
-            textInputs.forEach((inputElement, index) => {
-              if (rawQuestion.answer[index] !== undefined) {
-                inputElement.value = String(rawQuestion.answer[index] ?? "");
-                inputElement.dispatchEvent(new Event("input", { bubbles: true }));
-                inputElement.dispatchEvent(new Event("change", { bubbles: true }));
-              }
-            });
-          }
-        } else if (rawQuestion.type === "3") {
-          let answer = "true";
-          if (String(rawQuestion.answer[0]).match(/(^|,)(正确|是|对|√|T|ri|right|true)(,|$)/i)) {
-            answer = "true";
-          } else if (String(rawQuestion.answer[0]).match(/(^|,)(错误|否|错|×|F|wr|wrong|false)(,|$)/i)) {
-            answer = "false";
-          }
-          const trueOrFalse = {
-            "true": "对",
-            "false": "错"
-          };
-          for (const key in questionOptions) {
-            const optEl = toRawVal(questionOptions[key]);
-            if (!optEl) continue;
-            if (["zj", "zy"].includes(this.type)) {
-              if ((_a = optEl.getAttribute("aria-label")) == null ? void 0 : _a.includes(`${trueOrFalse[answer]}选择`)) {
-                if (optEl.getAttribute("aria-checked") === "true")
-                  return;
-                optEl.click();
-              }
-            } else if (["ks"].includes(this.type)) {
-              const span = optEl.querySelector(`span[data='${answer}']`);
-              if (span == null ? void 0 : span.querySelector(".check_answer"))
-                return;
-              span == null ? void 0 : span.click();
-            }
           }
         } else if (rawQuestion.type === "4" || rawQuestion.type === "6") {
           const textareaElement = questionElement ? questionElement.querySelector("textarea") : null;
@@ -8196,10 +8431,7 @@
         }
 
         if (questionElement && rawQuestion.type === "8") {
-          const textInputs = Array.from(questionElement.querySelectorAll("input")).filter((input) => {
-            const type = (input.getAttribute("type") || "text").toLowerCase();
-            return ["", "text", "search"].includes(type) && !input.disabled && !input.hidden;
-          });
+          const textInputs = this.getVisibleFillTextInputs(questionElement, ["", "text", "search"]);
           if (textInputs.length > 0) {
             textInputs.forEach((inputElement, index) => {
               if (rawQuestion.answer[index] !== undefined) {
@@ -8360,20 +8592,35 @@
         // 关键防护 A：剔除包含其它候选节点的父节点，只保留最深层标题节点，防止父div与子p双重计数
         headingElements = headingElements.filter((el) => !headingElements.some((other) => other !== el && el.contains(other)));
 
-        // 关键防护 B：按提取出的题号数字（如 (1), (2), (3) 或 1. 等）严格去重，每道小题只保留一个唯一标题节点
-        const seenSubNums = new Set();
-        headingElements = headingElements.filter((el) => {
+        // 关键防护 B：按提取出的题号数字（如 (1), (2), (3) 或 1. 等）严格去重；若材料正文中先出现 (1) 且与真正小题标题 (1) 之间没有任何选项，则以紧贴选项的后者为准
+        const docFollowing = (typeof Node !== "undefined" && Node.DOCUMENT_POSITION_FOLLOWING) ? Node.DOCUMENT_POSITION_FOLLOWING : 4;
+        const isBeforeNode = (a, b) => Boolean(a && b && typeof a.compareDocumentPosition === "function" && (a.compareDocumentPosition(b) & docFollowing));
+        const hasOptionBetween = (a, b) => optionElements.some((opt) => isBeforeNode(a, opt) && isBeforeNode(opt, b));
+        const seenSubMap = new Map();
+        const dedupedHeadings = [];
+        headingElements.forEach((el) => {
           const text = (el.textContent || "").trim();
           const m = text.match(/^[（\(]\s*(\d+)\s*[）\)]/) || text.match(/^(\d+)[\.、]/);
-          if (!m) return false;
+          if (!m) return;
           const num = m[1];
-          if (seenSubNums.has(num)) return false;
-          seenSubNums.add(num);
-          return true;
+          if (!seenSubMap.has(num)) {
+            seenSubMap.set(num, dedupedHeadings.length);
+            dedupedHeadings.push(el);
+          } else {
+            const prevIdx = seenSubMap.get(num);
+            const prevEl = dedupedHeadings[prevIdx];
+            if (isBeforeNode(prevEl, el) && !hasOptionBetween(prevEl, el)) {
+              dedupedHeadings[prevIdx] = el;
+            }
+          }
         });
+        headingElements = dedupedHeadings;
 
         // 关键防护 C：按文档流顺序正序排序
-        headingElements.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        headingElements.sort((a, b) => (isBeforeNode(a, b) ? -1 : 1));
+
+        const radios = Array.from(questionElement.querySelectorAll("input[type='radio']"));
+        const radioNameSet = new Set(radios.map((r) => r.name || r.getAttribute("name")).filter(Boolean));
 
         // 3. 计算实际小题总数 subCount
         let subCount = 0;
@@ -8390,16 +8637,17 @@
           if (uls.length > 1) {
             subCount = Math.max(subCount, uls.length);
           }
-          const radios = Array.from(questionElement.querySelectorAll("input[type='radio']"));
-          const radioNameSet = new Set(radios.map((r) => r.name || r.getAttribute("name")).filter(Boolean));
           if (radioNameSet.size > 1) {
             subCount = Math.max(subCount, radioNameSet.size);
           }
         }
 
-        // 严防虚增：若已识别到 A 选项次数，subCount 绝对不能超过 A 选项数量
-        if (aIndices.length > 1 && subCount > aIndices.length) {
+        // 严防虚增：若已识别到 A 选项次数（包括仅有 1 个 A 选项的普通单选题），或全部单选框同属一个 name 组，subCount 绝对不能超过实际选项组数
+        if (aIndices.length >= 1 && subCount > aIndices.length) {
           subCount = aIndices.length;
+        }
+        if (radioNameSet.size === 1 && subCount > 1) {
+          subCount = 1;
         }
 
         let subOptionGroups = [];
@@ -8494,8 +8742,8 @@
             }
           }
 
-          // 优先级 6. 回退方案：按小题数量等额切分
-          if (subOptionGroups.length === 0 && optionElements.length >= subCount) {
+          // 优先级 6. 回退方案：按小题数量等额切分（仅当不存在单一 A 选项组或单一 radio 组时允许切分）
+          if (subOptionGroups.length === 0 && aIndices.length !== 1 && radioNameSet.size !== 1 && optionElements.length >= subCount) {
             const chunkSize = Math.max(1, Math.floor(optionElements.length / subCount));
             for (let i = 0; i < subCount; i++) {
               const start = i * chunkSize;
@@ -9377,7 +9625,11 @@
             if (values == null ? void 0 : values.length) {
               question.answer = values;
               question.answerStatus = "success";
-              this.fillQuestion(question);
+              try {
+                this.fillQuestion(question);
+              } catch (fillErr) {
+                this.addLog(`第${index + 1}道题自动填写异常，已跳过以继续后续题目：${fillErr instanceof Error ? fillErr.message : String(fillErr)}`, "warning");
+              }
               this.addLog(`第${index + 1}道题搜索成功`, "success");
               if ((_a = answerData.meta) == null ? void 0 : _a.check_detail) {
                 const logType = answerData.meta.check_status === "arbitrated" ? "warning" : "primary";
@@ -9411,14 +9663,17 @@
           });
         } else if (question.type === "判断题") {
           let answer = "true";
-          if (String(question.answer[0]).match(/(^|,)(正确|是|对|√|T|ri|right|true)(,|$)/)) {
+          if (String(question.answer[0]).match(/(^|,)(正确|是|对|√|✓|✔|T|ri|right|true|yes)(,|$)/i)) {
             answer = "true";
-          } else if (String(question.answer[0]).match(/(^|,)(错误|否|错|×|F|wr|wrong|false)(,|$)/)) {
+          } else if (String(question.answer[0]).match(/(^|,)(错误|否|错|×|✕|✘|F|wr|wrong|false|no)(,|$)/i)) {
             answer = "false";
           }
+          const targetToken = answer === "true" ? "对" : "错";
           for (const key in question.options) {
-            if (this.normalizeJudgementText(key) === answer) {
-              this.clickOptionIfNeeded(question.options[key]);
+            const optEl = question.options[key];
+            if (this.normalizeJudgementText(key) === answer || extractJudgementToken(optEl, key) === targetToken) {
+              this.clickOptionIfNeeded(optEl);
+              break;
             }
           }
         } else if (question.type === "填空题" || question.type === "简答题") {
@@ -9571,21 +9826,29 @@
     questionStore.clearQuestion();
     logStore.addLog(`进入答题页面，开始准备答题`, "primary");
     logStore.addLog(`正在解析题目, 请等待5s`, "warning");
+    let zhsAnswerRunning = false;
     new XMLHttpRequestInterceptor(["gateway/t/v1/answer/hasAnswer"], async () => {
-      await sleep(1);
-      _unsafeWindow.document.getSelection = function() {
-        return {
-          removeAllRanges: function() {
-          }
+      if (zhsAnswerRunning)
+        return false;
+      zhsAnswerRunning = true;
+      try {
+        await sleep(1);
+        _unsafeWindow.document.getSelection = function() {
+          return {
+            removeAllRanges: function() {
+            }
+          };
         };
-      };
-      _unsafeWindow.document.onselectstart = true;
-      _unsafeWindow.document.oncontextmenu = true;
-      _unsafeWindow.document.oncut = true;
-      _unsafeWindow.document.oncopy = true;
-      _unsafeWindow.document.onpaste = true;
-      await new ZhsQuestionHandler().init();
-      return true;
+        _unsafeWindow.document.onselectstart = true;
+        _unsafeWindow.document.oncontextmenu = true;
+        _unsafeWindow.document.oncut = true;
+        _unsafeWindow.document.oncopy = true;
+        _unsafeWindow.document.onpaste = true;
+        await new ZhsQuestionHandler().init();
+        return true;
+      } finally {
+        zhsAnswerRunning = false;
+      }
     });
   };
   const DEFAULT_CARD_WIDTH = "310px";

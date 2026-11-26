@@ -26,8 +26,8 @@
 ## File Index
 
 - [README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/README.md): Overview, disclaimer, upstream attribution, Tampermonkey developer mode & `@connect` cross-origin permissions guide, and configuration manual.
-- [tangwg学习通.user.js](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/tangwg%E5%AD%A6%E4%B9%A0%E9%80%9A.user.js): Main Tampermonkey / ScriptCat userscript (`v0.9.1`, Vue 3 + Element Plus inside Shadow DOM).
-- [direct_mode_test.mjs](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/direct_mode_test.mjs): Offline Node.js unit test suite (107 assertions covering direct mode, SSE, option snapping, STT, Deepgram, and `flash` reasoning effort).
+- [tangwg学习通.user.js](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/tangwg%E5%AD%A6%E4%B9%A0%E9%80%9A.user.js): Main Tampermonkey / ScriptCat userscript (`v0.9.2`, Vue 3 + Element Plus inside Shadow DOM).
+- [direct_mode_test.mjs](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/direct_mode_test.mjs): Offline Node.js unit test suite (128 assertions covering direct mode, SSE, option snapping, STT, Deepgram, `flash` reasoning effort, judgement/formula matching, and misalignment guards).
 - [proxy/README.md](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/README.md): Deployment and architecture guide for the optional FastAPI + SQLite backend proxy.
 - [proxy/server.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/server.py): FastAPI server, SQLite answer & STT cache, option similarity snapping, and 3-way arbitration workflow.
 - [proxy/upstream.py](https://github.com/xiaoran7/tangwg-chaoxing/blob/main/proxy/upstream.py): Upstream OpenAI/CPA streaming client, wall-clock timeout enforcement, and OpenAI/Deepgram STT adapter.
